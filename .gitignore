@@ -1,0 +1,27 @@
+#Бинарники
+*.exe
+*.exe~
+*.dylib
+*.test
+*.out
+*.log
+
+# Зависимости
+vendor/
+bin/
+build/
+
+# Vscode
+.idea/
+.vscode/
+
+# Go
+go.work
+
+# Окружение
+.env
+
+
+# Docker
+docker-compose.override.yml
+*.local.yml
