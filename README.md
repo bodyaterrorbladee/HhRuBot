@@ -23,7 +23,7 @@
 ### 1. Клонируй проект
 
 ```bash
-git clone https://github.com/your-username/hhru-telegram-go-bot.git
+git clone https://github.com/bodyaterrorbladee/hhru-telegram-go-bot.git
 cd hhru-telegram-go-bot
 ```
 
