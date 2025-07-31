@@ -1,4 +1,4 @@
-# HH.ru Go Вакансии Бот 
+# HH.ru Bot 
 
 Телеграм-бот на Go, который раз в 30 минут проверяет свежие вакансии на hh.ru (по ключевым словам: `golang`, `go developer`) 
 и отправляет их в Telegram(нужен чат ID).
@@ -23,7 +23,7 @@
 ### 1. Клонируй проект
 
 ```bash
-git clone https://github.com/your-username/hhru-telegram-go-bot.git
+git clone https://github.com/bodyaterrorbladee/hhru-telegram-go-bot.git
 cd hhru-telegram-go-bot
 ```
 
