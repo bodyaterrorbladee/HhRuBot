@@ -84,7 +84,7 @@ func (s *Storage) GetUsers() ([]int64, error) {
 		}
 	}
 	return users, nil
-}	
+}
 func (s *Storage) GetAllUsers() ([]int64, error) {
 	var result []int64
 

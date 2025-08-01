@@ -1,7 +1,6 @@
 package main
 
 import (
-
 	"log"
 
 	"hhruBot/internal/config"
@@ -9,26 +8,37 @@ import (
 	"hhruBot/internal/storage"
 	"hhruBot/internal/telegram"
 )
+
 func main() {
+	// Инициализация конфигурации
 	cfg := config.LoadConfig()
-	storage := storage.NewStorage(cfg)
-	bot := telegram.NewBot(cfg, storage)
+
+	// Подключение к хранилищу
+	store := storage.NewStorage(cfg)
+
+	// Инициализация Telegram-бота
+	bot := telegram.NewBot(cfg, store)
+
+	// Инициализация клиента HH.ru
 	hhClient := hh.NewClient()
 
+	// Запуск бота в отдельной горутине
 	go bot.Start()
 
-	users, err := storage.GetAllUsers()
+	// Получение всех активных пользователей
+	users, err := store.GetAllUsers()
 	if err != nil {
-		log.Fatalf("Не удалось получить пользователей: %v", err)
+		log.Fatalf("failed to get users: %v", err)
 	}
 
+	// Запуск горутин для каждого пользователя
 	for _, chatID := range users {
-		bot.StopChans[chatID] = make(chan bool)
-		go telegram.StartUserVacancyChecker(chatID, hhClient, storage, bot, bot.StopChans[chatID])
+		stopCh := make(chan bool)
+		bot.StopChans[chatID] = stopCh
+
+		go telegram.StartUserVacancyChecker(chatID, hhClient, store, bot, stopCh)
 	}
 
-// Чтобы main не завершился
-select {}
+	// Блокировка main потока
+	select {}
 }
-
-

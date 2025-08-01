@@ -1,45 +1,43 @@
 package hh
 
-import(
+import (
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
-	"time"
 	"strings"
+	"time"
 )
 
-
-type Vacancy struct{
-	Id string
+type Vacancy struct {
+	Id   string
 	Name string
-	Url string
-	Area struct{
-		Name string	`json:"name"`
-	}`json:"area"`
+	Url  string
+	Area struct {
+		Name string `json:"name"`
+	} `json:"area"`
 }
 
-type ResponseHH struct{
+type ResponseHH struct {
 	Items []Vacancy `json:"items"`
 }
 
-type Client struct{
+type Client struct {
 	baseURL string
-	client *http.Client
+	client  *http.Client
 }
 
-func NewClient() *Client{
+func NewClient() *Client {
 	return &Client{
 		baseURL: "https://api.hh.ru/vacancies",
 		client: &http.Client{
-			Timeout: 10 *time.Second,
-		} ,
+			Timeout: 10 * time.Second,
+		},
 	}
 }
 
-
-func (c *Client) GetVacancies(tags []string, cities []string) ([]Vacancy, error)  {
+func (c *Client) GetVacancies(tags []string, cities []string) ([]Vacancy, error) {
 	params := url.Values{}
 
 	// Формируем строку поиска из тегов

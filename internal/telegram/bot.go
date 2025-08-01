@@ -1,27 +1,22 @@
 package telegram
 
 import (
-
 	"log"
 	"strconv"
 	"strings"
 
 	"hhruBot/internal/config"
-	"hhruBot/internal/storage"
 	"hhruBot/internal/hh"
-	
-	
+	"hhruBot/internal/storage"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
-
 type Bot struct {
-	Api     *tgbotapi.BotAPI
-	Storage *storage.Storage
+	Api       *tgbotapi.BotAPI
+	Storage   *storage.Storage
 	StopChans map[int64]chan bool
 }
-
 
 func NewBot(cfg *config.Config, storage *storage.Storage) *Bot {
 	api, err := tgbotapi.NewBotAPI(cfg.TelegramBotToken)
@@ -38,10 +33,10 @@ func NewBot(cfg *config.Config, storage *storage.Storage) *Bot {
 	}
 }
 
-func (b *Bot) SendMessage(chatID int64, text string){
+func (b *Bot) SendMessage(chatID int64, text string) {
 	msg := tgbotapi.NewMessage(chatID, text)
-	_,err := b.Api.Send(msg)
-	if err!=nil{
+	_, err := b.Api.Send(msg)
+	if err != nil {
 		log.Print("Не удалось отправить сообщение")
 	}
 }
@@ -79,7 +74,7 @@ func (b *Bot) Start() {
 			} else {
 				_ = b.Storage.AddUser(chatID) // 👈 добавляем пользователя
 				b.SendMessage(chatID, "Теги сохранены: "+tags)
-}
+			}
 
 		case strings.HasPrefix(text, "/city"):
 			cities := strings.TrimSpace(strings.TrimPrefix(text, "/city"))
@@ -88,37 +83,62 @@ func (b *Bot) Start() {
 				continue
 			}
 			err := b.Storage.SetUserSetting(chatID, "cities", cities)
-				if err != nil {
-					b.SendMessage(chatID, "Ошибка при сохранении городов")
-				} else {
-					_ = b.Storage.AddUser(chatID) // 👈 добавляем пользователя
-					b.SendMessage(chatID, "Города сохранены: "+cities)
-}
+			if err != nil {
+				b.SendMessage(chatID, "Ошибка при сохранении городов")
+			} else {
+				_ = b.Storage.AddUser(chatID) // 👈 добавляем пользователя
+				b.SendMessage(chatID, "Города сохранены: "+cities)
+			}
 
-case strings.HasPrefix(text, "/interval"):
-	intervalStr := strings.TrimSpace(strings.TrimPrefix(text, "/interval"))
-	intervalMin, err := strconv.Atoi(intervalStr)
-	if err != nil || intervalMin <= 0 {
-		b.SendMessage(chatID, "Интервал должен быть положительным числом в минутах, пример:\n/interval 30")
-		continue
-	}
+		case strings.HasPrefix(text, "/interval"):
+			intervalStr := strings.TrimSpace(strings.TrimPrefix(text, "/interval"))
+			intervalMin, err := strconv.Atoi(intervalStr)
+			if err != nil || intervalMin <= 0 {
+				b.SendMessage(chatID, "Интервал должен быть положительным числом в минутах, пример:\n/interval 30")
+				continue
+			}
 
-	err = b.Storage.SetUserSetting(chatID, "interval", intervalStr)
-	if err != nil {
-		b.SendMessage(chatID, "Ошибка при сохранении интервала")
-		return
-	}
+			err = b.Storage.SetUserSetting(chatID, "interval", intervalStr)
+			if err != nil {
+				b.SendMessage(chatID, "Ошибка при сохранении интервала")
+				return
+			}
 
-	b.SendMessage(chatID, "Интервал сохранён: "+intervalStr+" мин.")
+			b.SendMessage(chatID, "Интервал сохранён: "+intervalStr+" мин.")
 
-	// 🔁 Останавливаем старую горутину, если есть
-	if stopCh, ok := b.StopChans[chatID]; ok {
-		stopCh <- true
-	}
-	newStopCh := make(chan bool)
-	b.StopChans[chatID] = newStopCh
-	go StartUserVacancyChecker(chatID, hh.NewClient(), b.Storage, b, newStopCh)
+			// 🔁 Останавливаем старую горутину, если есть
+			if stopCh, ok := b.StopChans[chatID]; ok {
+				stopCh <- true
+			}
+			newStopCh := make(chan bool)
+			b.StopChans[chatID] = newStopCh
+			go StartUserVacancyChecker(chatID, hh.NewClient(), b.Storage, b, newStopCh)
 
+		case strings.HasPrefix(text, "/settings"):
+			tags, _ := b.Storage.GetUserSetting(chatID, "tags")
+			cities, _ := b.Storage.GetUserSetting(chatID, "cities")
+			interval, _ := b.Storage.GetUserSetting(chatID, "interval")
+
+			if tags == "" {
+				tags = "не установлены"
+			}
+			if cities == "" {
+				cities = "не установлены"
+			}
+			if interval == "" {
+				interval = "по умолчанию (30 минут)"
+			} else {
+				interval += " минут"
+			}
+
+			settingsMsg := "📌 *Ваши настройки:*\n" +
+				"🔖 Теги: `" + tags + "`\n" +
+				"🏙️ Города: `" + cities + "`\n" +
+				"⏱️ Интервал: `" + interval + "`"
+
+			msg := tgbotapi.NewMessage(chatID, settingsMsg)
+			msg.ParseMode = "Markdown"
+			_, _ = b.Api.Send(msg)
 		default:
 			b.SendMessage(chatID, "Неизвестная команда. Попробуйте /start")
 		}

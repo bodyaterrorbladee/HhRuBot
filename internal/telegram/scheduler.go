@@ -7,9 +7,9 @@ import (
 	"strings"
 	"time"
 
+	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"hhruBot/internal/hh"
 	"hhruBot/internal/storage"
-	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
 func StartUserVacancyChecker(chatID int64, hhClient *hh.Client, storage *storage.Storage, bot *Bot, stopCh chan bool) {
