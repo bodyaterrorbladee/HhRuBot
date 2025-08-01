@@ -26,7 +26,7 @@ func main() {
 	go bot.Start()
 
 	// Получение всех активных пользователей
-	users, err := store.GetAllUsers()
+	users, err := store.GetUsers()
 	if err != nil {
 		log.Fatalf("failed to get users: %v", err)
 	}

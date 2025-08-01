@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -26,23 +25,21 @@ func NewStorage(cfg *config.Config) *Storage {
 
 	ctx := context.Background()
 	if err := rdb.Ping(ctx).Err(); err != nil {
-		log.Fatal("Ну удалось подключиться к Redis", err)
-	}
-	fmt.Println("Успешное подключение к Redis")
-
-	return &Storage{
-		client: rdb,
-		ctx:    ctx,
+		log.Fatal("Не удалось подключиться к Redis:", err)
 	}
 
+	fmt.Println("✅ Успешное подключение к Redis")
+
+	return &Storage{client: rdb, ctx: ctx}
 }
+
+// === Вакансии ===
 
 func (s *Storage) AlreadySeen(vacancyID int) bool {
 	key := "vacancy:" + strconv.Itoa(vacancyID)
-
 	exists, err := s.client.Exists(s.ctx, key).Result()
 	if err != nil {
-		log.Printf("Redis ошибка метода Exists:%v", err)
+		log.Printf("Redis Exists error: %v", err)
 		return false
 	}
 	return exists == 1
@@ -50,23 +47,50 @@ func (s *Storage) AlreadySeen(vacancyID int) bool {
 
 func (s *Storage) MarkAsSeen(vacancyID int) {
 	key := "vacancy:" + strconv.Itoa(vacancyID)
-
-	err := s.client.Set(s.ctx, key, "1", 7*24*time.Hour).Err()
-
-	if err != nil {
-		log.Printf("Redis ошибка метода SET :%v", err)
+	if err := s.client.Set(s.ctx, key, "1", 7*24*time.Hour).Err(); err != nil {
+		log.Printf("Redis Set error: %v", err)
 	}
 }
+
+// === Настройки пользователя ===
+
 func (s *Storage) SetUserSetting(chatID int64, key, value string) error {
-	fullKey := fmt.Sprintf("user:%d:%s", chatID, key)
-	return s.client.Set(s.ctx, fullKey, value, 0).Err()
+	redisKey := fmt.Sprintf("user:%d:%s", chatID, key)
+	return s.client.Set(s.ctx, redisKey, value, 0).Err()
 }
 
-// Получение пользовательской настройки
 func (s *Storage) GetUserSetting(chatID int64, key string) (string, error) {
-	fullKey := fmt.Sprintf("user:%d:%s", chatID, key)
-	return s.client.Get(s.ctx, fullKey).Result()
+	redisKey := fmt.Sprintf("user:%d:%s", chatID, key)
+	return s.client.Get(s.ctx, redisKey).Result()
 }
+
+// Удобный метод для интервала как int
+func (s *Storage) GetUserInterval(chatID int64) (int, error) {
+	val, err := s.GetUserSetting(chatID, "interval")
+	if err != nil {
+		return 0, err
+	}
+	return strconv.Atoi(val)
+}
+
+// === Последнее время проверки ===
+
+func (s *Storage) SetLastChecked(chatID int64, t time.Time) error {
+	key := fmt.Sprintf("user:%d:last_checked", chatID)
+	return s.client.Set(s.ctx, key, t.Unix(), 0).Err()
+}
+
+func (s *Storage) GetLastChecked(chatID int64) (time.Time, error) {
+	key := fmt.Sprintf("user:%d:last_checked", chatID)
+	unixTs, err := s.client.Get(s.ctx, key).Int64()
+	if err != nil {
+		return time.Time{}, err
+	}
+	return time.Unix(unixTs, 0), nil
+}
+
+// === Пользователи ===
+
 func (s *Storage) AddUser(chatID int64) error {
 	return s.client.SAdd(s.ctx, "users", strconv.FormatInt(chatID, 10)).Err()
 }
@@ -76,6 +100,7 @@ func (s *Storage) GetUsers() ([]int64, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	users := make([]int64, 0, len(userStrs))
 	for _, u := range userStrs {
 		id, err := strconv.ParseInt(u, 10, 64)
@@ -84,40 +109,4 @@ func (s *Storage) GetUsers() ([]int64, error) {
 		}
 	}
 	return users, nil
-}
-func (s *Storage) GetAllUsers() ([]int64, error) {
-	var result []int64
-
-	iter := s.client.Scan(s.ctx, 0, "settings:*", 0).Iterator()
-	for iter.Next(s.ctx) {
-		key := iter.Val()
-		parts := strings.Split(key, ":")
-		if len(parts) != 3 {
-			continue
-		}
-
-		chatIDStr := parts[1]
-		chatID, err := strconv.ParseInt(chatIDStr, 10, 64)
-		if err != nil {
-			continue
-		}
-
-		// Добавляем только уникальные chatID
-		if !contains(result, chatID) {
-			result = append(result, chatID)
-		}
-	}
-	if err := iter.Err(); err != nil {
-		return nil, err
-	}
-	return result, nil
-}
-
-func contains(slice []int64, item int64) bool {
-	for _, v := range slice {
-		if v == item {
-			return true
-		}
-	}
-	return false
 }

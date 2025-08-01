@@ -11,9 +11,8 @@ import (
 )
 
 type Vacancy struct {
-	Id   string
-	Name string
-	Url  string
+	Id   string `json:"id"`
+	Name string `json:"name"`
 	Area struct {
 		Name string `json:"name"`
 	} `json:"area"`
@@ -37,29 +36,26 @@ func NewClient() *Client {
 	}
 }
 
-func (c *Client) GetVacancies(tags []string, cities []string) ([]Vacancy, error) {
+func (c *Client) GetVacancies(tags, cities []string, from time.Time) ([]Vacancy, error) {
 	params := url.Values{}
 
-	// Формируем строку поиска из тегов
+	// Поисковая строка
 	if len(tags) > 0 {
-		searchText := strings.Join(tags, " OR ")
-		params.Set("text", searchText)
+		params.Set("text", strings.Join(tags, " OR "))
 	} else {
 		params.Set("text", "golang") // fallback
 	}
 
-	// Добавляем регионы (area) — по коду HH
+	// Города (area)
 	if len(cities) > 0 {
 		for _, city := range cities {
-			areaCode := mapCityToAreaCode(strings.ToLower(strings.TrimSpace(city)))
-			if areaCode != "" {
-				params.Add("area", areaCode)
+			if code := mapCityToAreaCode(strings.ToLower(strings.TrimSpace(city))); code != "" {
+				params.Add("area", code)
 			}
 		}
 	} else {
-		// fallback: Москва и Питер
-		params.Add("area", "1")
-		params.Add("area", "2")
+		params.Add("area", "1") // Москва
+		params.Add("area", "2") // СПб
 	}
 
 	params.Set("order_by", "publication_time")
@@ -67,13 +63,16 @@ func (c *Client) GetVacancies(tags []string, cities []string) ([]Vacancy, error)
 	params.Set("page", "0")
 	params.Set("only_with_salary", "false")
 
+	// 🔥 Только свежие вакансии
+	params.Set("date_from", from.Format(time.RFC3339))
+
 	url := fmt.Sprintf("%s?%s", c.baseURL, params.Encode())
 
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("User-agent", "go-job-bot/0.1")
+	req.Header.Set("User-Agent", "golang-job-bot/1.0")
 
 	resp, err := c.client.Do(req)
 	if err != nil {
@@ -90,8 +89,10 @@ func (c *Client) GetVacancies(tags []string, cities []string) ([]Vacancy, error)
 	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
 		return nil, err
 	}
+
 	return data.Items, nil
 }
+
 func mapCityToAreaCode(city string) string {
 	switch city {
 	case "москва":
