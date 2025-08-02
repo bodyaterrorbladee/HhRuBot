@@ -110,3 +110,21 @@ func (s *Storage) GetUsers() ([]int64, error) {
 	}
 	return users, nil
 }
+func (s *Storage) PauseUser(chatID int64) error {
+	key := fmt.Sprintf("user:%d:paused", chatID)
+	return s.client.Set(s.ctx, key, "1", 0).Err()
+}
+
+func (s *Storage) ResumeUser(chatID int64) error {
+	key := fmt.Sprintf("user:%d:paused", chatID)
+	return s.client.Del(s.ctx, key).Err()
+}
+
+func (s *Storage) IsUserPaused(chatID int64) (bool, error) {
+	key := fmt.Sprintf("user:%d:paused", chatID)
+	exists, err := s.client.Exists(s.ctx, key).Result()
+	if err != nil {
+		return false, err
+	}
+	return exists == 1, nil
+}

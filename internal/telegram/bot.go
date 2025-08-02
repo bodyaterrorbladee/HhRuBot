@@ -15,6 +15,7 @@ import (
 type Bot struct {
 	Api       *tgbotapi.BotAPI
 	Storage   *storage.Storage
+	HHClient  *hh.Client
 	StopChans map[int64]chan bool
 }
 
@@ -29,6 +30,7 @@ func NewBot(cfg *config.Config, storage *storage.Storage) *Bot {
 	return &Bot{
 		Api:       api,
 		Storage:   storage,
+		HHClient:  hh.NewClient(),
 		StopChans: make(map[int64]chan bool),
 	}
 }
@@ -57,10 +59,19 @@ func (b *Bot) Start() {
 
 		switch {
 		case strings.HasPrefix(text, "/start"):
-			b.SendMessage(chatID, "Привет! Я бот для поиска вакансий. Используй команды:\n"+
-				"/tags golang,devops\n"+
-				"/city Москва,Санкт-Петербург\n"+
-				"/interval 30")
+			b.Storage.AddUser(chatID)
+			b.SendMessage(chatID, `👋 Добро пожаловать в HH.ru Бот!
+
+			Я помогу тебе следить за новыми вакансиями.
+
+			⚙️ Основные команды:
+			/tags golang,devops — задать ключевые слова
+			/city Москва — выбрать город(а)
+			/interval 30 — интервал проверки (в минутах)
+			/pause — приостановить уведомления
+			/search — возобновить работу
+			/settings — показать текущие настройки
+			/help — справка по командам`)
 
 		case strings.HasPrefix(text, "/tags"):
 			tags := strings.TrimSpace(strings.TrimPrefix(text, "/tags"))
@@ -112,7 +123,7 @@ func (b *Bot) Start() {
 			}
 			newStopCh := make(chan bool)
 			b.StopChans[chatID] = newStopCh
-			go StartUserVacancyChecker(chatID, hh.NewClient(), b.Storage, b, newStopCh)
+			go StartUserVacancyChecker(chatID, b.HHClient, b.Storage, b, newStopCh)
 
 		case strings.HasPrefix(text, "/settings"):
 			tags, _ := b.Storage.GetUserSetting(chatID, "tags")
@@ -139,6 +150,48 @@ func (b *Bot) Start() {
 			msg := tgbotapi.NewMessage(chatID, settingsMsg)
 			msg.ParseMode = "Markdown"
 			_, _ = b.Api.Send(msg)
+
+		case strings.HasPrefix(text, "/pause"):
+			err := b.Storage.PauseUser(chatID)
+			if err != nil {
+				b.SendMessage(chatID, "❌ Не удалось поставить на паузу.")
+				continue
+			}
+			if stopCh, ok := b.StopChans[chatID]; ok {
+				stopCh <- true
+				delete(b.StopChans, chatID)
+			}
+			b.SendMessage(chatID, "⏸️ Поиск вакансий приостановлен. Для продолжения — /search.")
+
+		case strings.HasPrefix(text, "/search"):
+			paused, _ := b.Storage.IsUserPaused(chatID)
+			if !paused {
+				b.SendMessage(chatID, "🔄 Поиск уже активен.")
+				continue
+			}
+
+			err := b.Storage.ResumeUser(chatID)
+			if err != nil {
+				b.SendMessage(chatID, "❌ Не удалось возобновить поиск.")
+				continue
+			}
+
+			stopCh := make(chan bool)
+			b.StopChans[chatID] = stopCh
+			go StartUserVacancyChecker(chatID, b.HHClient, b.Storage, b, stopCh)
+
+			b.SendMessage(chatID, "✅ Поиск возобновлён.")
+
+		case strings.HasPrefix(text, "/help"):
+			b.SendMessage(chatID, `🛠 Доступные команды:
+				/tags — задать ключевые слова
+				/city — выбрать города
+				/interval — частота поиска (в минутах)
+				/pause — остановить рассылку
+				/search — возобновить рассылку
+				/settings — показать текущие настройки
+				/help — показать справку`)
+
 		default:
 			b.SendMessage(chatID, "Неизвестная команда. Попробуйте /start")
 		}
