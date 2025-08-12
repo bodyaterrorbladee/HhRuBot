@@ -4,7 +4,6 @@ import (
 	"log"
 	"strconv"
 	"strings"
-	"sync"
 
 	"hhruBot/internal/config"
 	"hhruBot/internal/hh"
@@ -18,7 +17,6 @@ type Bot struct {
 	Storage   *storage.Storage
 	HHClient  *hh.Client
 	StopChans map[int64]chan struct{}
-	mu        sync.Mutex
 }
 
 func NewBot(cfg *config.Config, storage *storage.Storage) *Bot {
@@ -29,47 +27,35 @@ func NewBot(cfg *config.Config, storage *storage.Storage) *Bot {
 
 	log.Printf("Авторизация прошла как: %s", api.Self.UserName)
 
-	return &Bot{
+	b := &Bot{
 		Api:       api,
 		Storage:   storage,
 		HHClient:  hh.NewClient(),
 		StopChans: make(map[int64]chan struct{}),
 	}
+
+	// 🔄 Автоматический запуск чекеров для активных пользователей
+	users, err := storage.GetActiveUsers()
+	if err != nil {
+		log.Printf("⚠ Не удалось получить список активных пользователей: %v", err)
+	} else {
+		for _, chatID := range users {
+			log.Printf("▶ Автозапуск чекера для chatID %d", chatID)
+			stopCh := make(chan struct{})
+			b.StopChans[chatID] = stopCh
+			go StartUserVacancyChecker(chatID, b.HHClient, b.Storage, b, stopCh)
+		}
+	}
+
+	return b
 }
 
 func (b *Bot) SendMessage(chatID int64, text string) {
 	msg := tgbotapi.NewMessage(chatID, text)
 	_, err := b.Api.Send(msg)
 	if err != nil {
-		log.Print("Не удалось отправить сообщение")
+		log.Printf("Не удалось отправить сообщение %d: %v", chatID, err)
 	}
-}
-
-// Вспомогательные методы для безопасной работы со StopChans
-func (b *Bot) stopAndRemoveChan(chatID int64) {
-	b.mu.Lock()
-	ch, ok := b.StopChans[chatID]
-	if ok {
-		// close - неблокирующий сигнал для получателя
-		close(ch)
-		delete(b.StopChans, chatID)
-	}
-	b.mu.Unlock()
-}
-
-func (b *Bot) createAndStoreStopChan(chatID int64) chan struct{} {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	ch := make(chan struct{})
-	b.StopChans[chatID] = ch
-	return ch
-}
-
-func (b *Bot) hasStopChan(chatID int64) bool {
-	b.mu.Lock()
-	_, ok := b.StopChans[chatID]
-	b.mu.Unlock()
-	return ok
 }
 
 func (b *Bot) Start() {
@@ -91,16 +77,16 @@ func (b *Bot) Start() {
 			b.Storage.AddUser(chatID)
 			b.SendMessage(chatID, `👋 Добро пожаловать в HH.ru Бот!
 
-			Я помогу тебе следить за новыми вакансиями.
+Я помогу тебе следить за новыми вакансиями.
 
-			⚙️ Основные команды:
-			/tags golang,devops — задать ключевые слова
-			/city Москва — выбрать город(а)
-			/interval 30 — интервал проверки (в минутах)
-			/pause — приостановить уведомления
-			/search — возобновить работу
-			/settings — показать текущие настройки
-			/help — справка по командам`)
+⚙️ Основные команды:
+/tags golang,devops — задать ключевые слова
+/city Москва — выбрать город(а)
+/interval 30 — интервал проверки (в минутах)
+/pause — приостановить уведомления
+/search — возобновить работу
+/settings — показать текущие настройки
+/help — справка по командам`)
 
 		case strings.HasPrefix(text, "/tags"):
 			tags := strings.TrimSpace(strings.TrimPrefix(text, "/tags"))
@@ -151,9 +137,11 @@ func (b *Bot) Start() {
 
 			b.SendMessage(chatID, "Интервал сохранён: "+intervalStr+" мин.")
 
-			// Останавливаем старую горутину (неблокирующе) и запускаем новую
-			b.stopAndRemoveChan(chatID)
-			newStopCh := b.createAndStoreStopChan(chatID)
+			if stopCh, ok := b.StopChans[chatID]; ok {
+				close(stopCh)
+			}
+			newStopCh := make(chan struct{})
+			b.StopChans[chatID] = newStopCh
 			go StartUserVacancyChecker(chatID, b.HHClient, b.Storage, b, newStopCh)
 
 		case strings.HasPrefix(text, "/settings"):
@@ -197,13 +185,15 @@ func (b *Bot) Start() {
 				b.SendMessage(chatID, "❌ Не удалось поставить на паузу.")
 				continue
 			}
-			// безопасно останавливаем горутину
-			b.stopAndRemoveChan(chatID)
+			if stopCh, ok := b.StopChans[chatID]; ok {
+				close(stopCh)
+				delete(b.StopChans, chatID)
+			}
 			b.SendMessage(chatID, "⏸️ Поиск вакансий приостановлен. Для продолжения — /search.")
 
 		case strings.HasPrefix(text, "/search"):
 			paused, _ := b.Storage.IsUserPaused(chatID)
-			if !paused && b.hasStopChan(chatID) {
+			if !paused {
 				b.SendMessage(chatID, "🔄 Поиск уже активен.")
 				continue
 			}
@@ -214,26 +204,21 @@ func (b *Bot) Start() {
 				continue
 			}
 
-			// если уже есть запущенная горутина — не запускаем новую
-			if b.hasStopChan(chatID) {
-				b.SendMessage(chatID, "🔄 Поиск уже активен.")
-				continue
-			}
-
-			stopCh := b.createAndStoreStopChan(chatID)
+			stopCh := make(chan struct{})
+			b.StopChans[chatID] = stopCh
 			go StartUserVacancyChecker(chatID, b.HHClient, b.Storage, b, stopCh)
 
 			b.SendMessage(chatID, "✅ Поиск возобновлён.")
 
 		case strings.HasPrefix(text, "/help"):
 			b.SendMessage(chatID, `🛠 Доступные команды:
-				/tags — задать ключевые слова
-				/city — выбрать города
-				/interval — частота поиска (в минутах)
-				/pause — остановить рассылку
-				/search — возобновить рассылку
-				/settings — показать текущие настройки
-				/help — показать справку`)
+/tags — задать ключевые слова
+/city — выбрать города
+/interval — частота поиска (в минутах)
+/pause — остановить рассылку
+/search — возобновить рассылку
+/settings — показать текущие настройки
+/help — показать справку`)
 
 		default:
 			b.SendMessage(chatID, "Неизвестная команда. Попробуйте /start")

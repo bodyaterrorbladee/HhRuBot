@@ -6,6 +6,7 @@ import (
 	"log"
 	"strconv"
 	"time"
+	"strings"
 
 	"github.com/redis/go-redis/v9"
 	"hhruBot/internal/config"
@@ -127,4 +128,52 @@ func (s *Storage) IsUserPaused(chatID int64) (bool, error) {
 		return false, err
 	}
 	return exists == 1, nil
+}
+// Пометить пользователя как disabled (например, заблокировал бота).
+func (s *Storage) DisableUser(chatID int64) error {
+	key := fmt.Sprintf("user:%d:disabled", chatID)
+	if err := s.client.Set(s.ctx, key, "1", 0).Err(); err != nil {
+		return err
+	}
+	// опционально удаляем из множества активных пользователей
+	return s.client.SRem(s.ctx, "users", strconv.FormatInt(chatID, 10)).Err()
+}
+
+func (s *Storage) IsUserDisabled(chatID int64) (bool, error) {
+	key := fmt.Sprintf("user:%d:disabled", chatID)
+	exists, err := s.client.Exists(s.ctx, key).Result()
+	if err != nil {
+		return false, err
+	}
+	return exists == 1, nil
+}
+func (s *Storage) GetActiveUsers() ([]int64, error) {
+    keys, err := s.client.Keys(s.ctx, "user:*:paused").Result()
+    if err != nil {
+        return nil, err
+    }
+
+    var activeUsers []int64
+    for _, key := range keys {
+        paused, err := s.client.Get(s.ctx, key).Result()
+        if err != nil && err != redis.Nil {
+            continue
+        }
+        if paused == "1" {
+            continue
+        }
+
+        // key example: user:12345:paused → extract 12345
+        parts := strings.Split(key, ":")
+        if len(parts) < 2 {
+            continue
+        }
+        chatID, err := strconv.ParseInt(parts[1], 10, 64)
+        if err != nil {
+            continue
+        }
+        activeUsers = append(activeUsers, chatID)
+    }
+
+    return activeUsers, nil
 }
