@@ -19,6 +19,10 @@ func main() {
 	// Инициализация Telegram-бота
 	bot := telegram.NewBot(cfg, store)
 
+	// Инициализация карт городов
+	if err := hh.InitCityMap(); err != nil {
+		log.Fatalf("Не удалось инициализировать карту городов: %v", err)
+	}
 	// Инициализация клиента HH.ru
 	hhClient := hh.NewClient()
 
@@ -33,10 +37,8 @@ func main() {
 
 	// Запуск горутин для каждого пользователя
 	for _, chatID := range users {
-		stopCh := make(chan bool)
-		bot.StopChans[chatID] = stopCh
-
-		go telegram.StartUserVacancyChecker(chatID, hhClient, store, bot, stopCh)
+		bot.StopChans[chatID] = make(chan struct{})
+go telegram.StartUserVacancyChecker(chatID, hhClient, store, bot, bot.StopChans[chatID])
 	}
 
 	// Блокировка main потока

@@ -17,34 +17,49 @@ func StartUserVacancyChecker(
 	hhClient *hh.Client,
 	storage *storage.Storage,
 	bot *Bot,
-	stopCh chan bool,
+	stopCh chan struct{},
 ) {
 	intervalMin, err := storage.GetUserInterval(chatID)
 	if err != nil || intervalMin <= 0 {
 		intervalMin = 30
 	}
 
-	ticker := time.NewTicker(time.Duration(intervalMin) * time.Minute)
-	defer ticker.Stop()
-
+	// Сначала пытаемся восстановить lastChecked из хранилища
 	lastChecked, err := storage.GetLastChecked(chatID)
 	if err != nil {
+		// если нет записи — смотрим назад на один интервал
 		lastChecked = time.Now().Add(-time.Duration(intervalMin) * time.Minute)
 	}
+
+	// Выполняем немедленную проверку (чтобы не ждать первый тик)
+	from := lastChecked
+	now := time.Now()
+	if err := checkVacancies(chatID, hhClient, storage, bot, from); err != nil {
+		log.Printf("❌ Ошибка при начальной проверке вакансий [%d]: %v", chatID, err)
+	} else {
+		// обновляем lastChecked только при успешной проверке
+		storage.SetLastChecked(chatID, now)
+		lastChecked = now
+	}
+
+	ticker := time.NewTicker(time.Duration(intervalMin) * time.Minute)
+	defer ticker.Stop()
 
 	for {
 		select {
 		case <-stopCh:
+			log.Printf("Остановлен чекер для chatID %d", chatID)
 			return
 		case <-ticker.C:
 			now := time.Now()
-
 			if err := checkVacancies(chatID, hhClient, storage, bot, lastChecked); err != nil {
 				log.Printf("❌ Ошибка при проверке вакансий [%d]: %v", chatID, err)
-			} else {
-				storage.SetLastChecked(chatID, now)
-				lastChecked = now
+				// при ошибке lastChecked не меняем — на следующем тике попробуем снова
+				continue
 			}
+			// при успешной проверке обновляем метку времени
+			storage.SetLastChecked(chatID, now)
+			lastChecked = now
 		}
 	}
 }

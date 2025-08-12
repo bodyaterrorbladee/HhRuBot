@@ -41,29 +41,33 @@ func (c *Client) GetVacancies(tags, cities []string, from time.Time) ([]Vacancy,
 
 	// Поисковая строка
 	if len(tags) > 0 {
+		for i, tag := range tags {
+			tags[i] = strings.ToLower(tag)
+		}
 		params.Set("text", strings.Join(tags, " OR "))
 	} else {
 		params.Set("text", "golang") // fallback
 	}
 
 	// Города (area)
-	if len(cities) > 0 {
-		for _, city := range cities {
-			if code := mapCityToAreaCode(strings.ToLower(strings.TrimSpace(city))); code != "" {
-				params.Add("area", code)
-			}
+	addedCity := false
+	for _, city := range cities {
+		if code := CityToAreaID(city); code != "" {
+			params.Add("area", code)
+			addedCity = true
 		}
-	} else {
+	}
+
+	// Если пользователь ничего не указал — ищем в Москве и СПб
+	if !addedCity {
 		params.Add("area", "1") // Москва
-		params.Add("area", "2") // СПб
+		params.Add("area", "2") // Санкт-Петербург
 	}
 
 	params.Set("order_by", "publication_time")
 	params.Set("per_page", "20")
 	params.Set("page", "0")
 	params.Set("only_with_salary", "false")
-
-	// 🔥 Только свежие вакансии
 	params.Set("date_from", from.Format(time.RFC3339))
 
 	url := fmt.Sprintf("%s?%s", c.baseURL, params.Encode())
@@ -91,21 +95,4 @@ func (c *Client) GetVacancies(tags, cities []string, from time.Time) ([]Vacancy,
 	}
 
 	return data.Items, nil
-}
-
-func mapCityToAreaCode(city string) string {
-	switch city {
-	case "москва":
-		return "1"
-	case "санкт-петербург", "питер", "спб":
-		return "2"
-	case "екатеринбург":
-		return "3"
-	case "новосибирск":
-		return "4"
-	case "казань":
-		return "88"
-	default:
-		return ""
-	}
 }
